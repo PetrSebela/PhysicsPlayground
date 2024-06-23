@@ -12,15 +12,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3196967f68c717bf180deb6b65fd4195, type: 3}
   m_Name: PlayerSettings
   m_EditorClassIdentifier: 
-  maxHorizontalSpeed: 12
+  maxGroundVelocity: 12
+  maxAirVelocity: 36
   maxAcceleration: 120
-  fallDrag: 1
-  walkDrag: 6
-  cameraSensitivity: 0.2
-  jumpForce: 1000
-  jumpInputBufferTime: 0.15
-  coyoteTime: 0.15
+  airDrag: 1
+  groundDrag: 6
   airControlAuthority: 0.45
   groundMask:
     serializedVersion: 2
     m_Bits: 8
+  jumpForce: 1000
+  jumpInputBufferTime: 0.15
+  coyoteTime: 0.15
+  slideDrag: 1
+  wallrunVerticalDampingFactor: 40
+  wallrunJumpRepelForce: 1250
+  maxWallDistance: 1
+  cameraSensitivity: 0.2

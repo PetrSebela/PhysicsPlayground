@@ -12,7 +12,7 @@ public class PlayerController : MonoBehaviour
 
     Keybinds keybinds;
 
-    Vector2 input = Vector2.zero;
+    public Vector2 input = Vector2.zero;
     Rigidbody _rb;
 
     [SerializeField] ObjectManipulator objectManipulator;
@@ -24,15 +24,24 @@ public class PlayerController : MonoBehaviour
 
     // jumping
     public bool isGrounded = false;
-
     double coyoteTimer = 0;
     double jumpBufferTimer = 0;
-    bool jumpButtonDown = false;
 
+    // wallrunning
+    float currentMaxVelocity;
+    public bool isWallruning = false;
+    RaycastHit wallrunWall;
+
+    // sliding
+    public bool isSliding = false;
+    
+    
     void Start()
     {
+
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+        currentMaxVelocity = playerSettings.maxGroundVelocity;
     }
 
     void Update()
@@ -70,40 +79,130 @@ public class PlayerController : MonoBehaviour
     void ProcessGround()
     {
         isGrounded = CheckGround();
-        if (isGrounded)
+        if (isGrounded || isWallruning)
             coyoteTimer = playerSettings.coyoteTime;
     }
 
     void ProcessMovement()
     {
-        _rb.drag = isGrounded ? playerSettings.walkDrag : playerSettings.fallDrag;
-        Vector3 wishDir = orientation.forward * input.y + orientation.right * input.x;
-        Vector3 horizontalAcceleration = wishDir.normalized * playerSettings.maxAcceleration * (isGrounded ? 1 : playerSettings.airControlAuthority);
-        _rb.AddForce(horizontalAcceleration, ForceMode.Acceleration);
+        ApplyDrag();
+
+        if(isWallruning)
+            ApplyWallrunForce();
+        else
+            ApplyMovementForce();
+
+        if(CanWallrun())
+            EnterWallrun();
+        else
+            ExitWallrun();
+
+        ProcessJump();
 
         LimitHorizontalVelocity();
     }
 
+    void ApplyDrag()
+    {
+        if(isGrounded)
+        {
+            _rb.drag = playerSettings.groundDrag;
+            return;
+        }
+
+        if(isSliding)
+        {
+            _rb.drag = playerSettings.slideDrag;
+            return;
+        }
+
+        _rb.drag = playerSettings.airDrag;
+    }
+
+    void ApplyMovementForce()
+    {
+        Vector3 wishDir = orientation.forward * input.y + orientation.right * input.x;
+        Vector3 horizontalAcceleration = wishDir.normalized * playerSettings.maxAcceleration * (isGrounded ? 1 : playerSettings.airControlAuthority);
+        _rb.AddForce(horizontalAcceleration, ForceMode.Acceleration);
+    }
+
+
+    void ApplyWallrunForce()
+    {
+        _rb.velocity = new(_rb.velocity.x, _rb.velocity.y * Time.fixedDeltaTime * playerSettings.wallrunVerticalDampingFactor, _rb.velocity.z);
+
+        Vector3 wallForward = Vector3.Cross(wallrunWall.normal, Vector3.up);
+        if((orientation.forward - wallForward).magnitude > (orientation.forward + wallForward).magnitude)
+            wallForward = -wallForward;
+
+        Vector3 wallrunAcceleration = wallForward * input.y * playerSettings.maxAcceleration;
+        _rb.AddForce(wallrunAcceleration, ForceMode.Acceleration);
+    }
+
     void LimitHorizontalVelocity()
     {
+        currentMaxVelocity = (isGrounded && !isSliding) ? playerSettings.maxGroundVelocity : playerSettings.maxAirVelocity; 
+        
+        
         Vector3 flatVelocity = new(_rb.velocity.x, 0, _rb.velocity.z);
-        if (flatVelocity.magnitude > playerSettings.maxHorizontalSpeed)
+        if (flatVelocity.magnitude > currentMaxVelocity)
         {
-            flatVelocity = flatVelocity.normalized * playerSettings.maxHorizontalSpeed;
-            _rb.velocity = new(flatVelocity.x, _rb.velocity.y, flatVelocity.z);
+            Vector3 lerp = Vector3.Lerp(flatVelocity, flatVelocity.normalized * currentMaxVelocity, 0.5f);
+            _rb.velocity = new(lerp.x, _rb.velocity.y, lerp.z);
         }
-        ProcessJump();
     }
 
     void ProcessJump()
     {
-        if(coyoteTimer > 0f && jumpBufferTimer > 0f)
+        if(coyoteTimer <= 0f || jumpBufferTimer <= 0f)
+            return;
+
+        if(isWallruning)
+        {
+            WallrunJump();
+            jumpBufferTimer = 0;            
+            coyoteTimer = 0f;
+            return;
+        }
+        else
         {
             _rb.AddForce(Vector3.up * playerSettings.jumpForce, ForceMode.Acceleration);
             jumpBufferTimer = 0;            
             coyoteTimer = 0f;
-
         }
+    }
+
+    void WallrunJump()
+    {
+        Vector3 jumpVector = (wallrunWall.normal + Vector3.up + orientation.forward).normalized;
+        Vector3 jumpAcceleration = jumpVector * playerSettings.wallrunJumpRepelForce;
+        _rb.AddForce(jumpAcceleration, ForceMode.Acceleration);
+    }
+
+    bool CanWallrun()
+    {
+        if (isGrounded || isSliding)
+            return false;
+
+        if(Physics.Raycast(transform.position, orientation.right, out wallrunWall, playerSettings.maxWallDistance, playerSettings.groundMask) && input.x > 0 )
+            return true;
+
+        if(Physics.Raycast(transform.position, -orientation.right, out wallrunWall, playerSettings.maxWallDistance, playerSettings.groundMask) && input.x < 0 )
+            return true;
+
+        return false;
+    }
+
+    void EnterWallrun()
+    {
+        _rb.useGravity = false;
+        isWallruning = true;
+    }    
+
+    void ExitWallrun()
+    {
+        _rb.useGravity = true;
+        isWallruning = false;
     }
 
     // --- key processing ---
@@ -120,6 +219,9 @@ public class PlayerController : MonoBehaviour
 
         keybinds.Movement.Jump.performed += OnJumpPerformed;
         keybinds.Movement.Jump.canceled += OnJumpCanceled;
+
+        keybinds.Movement.Slide.performed += OnSlidePerformed;
+        keybinds.Movement.Slide.canceled += OnSlideCanceled;
     }
     void OnDisable()
     {
@@ -134,6 +236,9 @@ public class PlayerController : MonoBehaviour
 
         keybinds.Movement.Jump.performed -= OnJumpPerformed;
         keybinds.Movement.Jump.canceled -= OnJumpCanceled;
+
+        keybinds.Movement.Slide.performed -= OnSlidePerformed;
+        keybinds.Movement.Slide.canceled -= OnSlideCanceled;
     }
     void OnMovementCanceled(InputAction.CallbackContext context)
     {
@@ -168,11 +273,28 @@ public class PlayerController : MonoBehaviour
     void OnJumpPerformed(InputAction.CallbackContext context)
     {
         jumpBufferTimer = playerSettings.jumpInputBufferTime;
-        jumpButtonDown = true;
     }
 
     void OnJumpCanceled(InputAction.CallbackContext context)
     {
-        jumpButtonDown = false;
+
     }
+
+    void OnSlidePerformed(InputAction.CallbackContext context)
+    {
+        isSliding = true;
+    }
+    void OnSlideCanceled(InputAction.CallbackContext context)
+    {
+        isSliding = false;        
+    }
+
+
+
+    // --- getters ---
+    public float GetFlatVelocity()
+    {
+        return new Vector3(_rb.velocity.x, 0, _rb.velocity.z).magnitude;
+    }
+
 }

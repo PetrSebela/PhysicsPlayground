@@ -10,7 +10,7 @@ public class ObjectManipulator : MonoBehaviour
 
     public bool TryGrab()
     {
-        if (!Physics.Raycast(this.transform.position, this.transform.forward, out RaycastHit hit, 10f))
+        if (!Physics.Raycast(this.transform.position, this.transform.forward, out RaycastHit hit, 10f, canManipulate))
             return false;
 
             
@@ -35,7 +35,7 @@ public class ObjectManipulator : MonoBehaviour
         grabbed = null;
     }
 
-    void FixedUpdate()
+    void Update()
     {
         if(!grabbed)
             return;
